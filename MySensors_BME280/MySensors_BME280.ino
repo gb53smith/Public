@@ -15,11 +15,11 @@
  * Measured voltage drop across a 10 ohm resistor connected to 3 AA cells.
  * 30 mA connected to the gateway
  * 14.5 mA with radio sleeping
- * < 0.1 mA Processor and Radio sleeping
+ * < 20 uA Processor and Radio sleeping
  * BME280 measurement time 8 mS
  * Total connect time per loop 1500 mS
- * Calculated average current of 0.25 mA with 0.1 mA sleep current
- * Life time of 2000 mA battery is 333 days
+ * Calculated average current of 0.174 mA with 20 uA sleep current
+ * Life time of 2000 mA battery is 479 days
  * 
  
 */
@@ -62,7 +62,13 @@ BME280 mySensor; //Global sensor object
 
 void setup()
 {
-  pinMode(A2, OUTPUT);  //Used for RFM69 CS (NSS)
+  /*
+  Used for RFM69 CS (NSS)
+  I don't think that the MySensors.h anticipates using analog
+  input as an output.
+  The radio does not work without the floowing pinMode statement.
+  */
+  pinMode(A2, OUTPUT);  
   #ifdef DEBUG
   SerialUSB.begin(9600);
   SerialUSB.println("Example showing alternate I2C addresses");
