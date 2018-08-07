@@ -17,11 +17,12 @@
  * 14.5 mA with radio sleeping
  * < 20 uA Processor and Radio sleeping
  * BME280 measurement time 8 mS
- * Total connect time per loop 1500 mS
- * Calculated average current of 0.174 mA with 20 uA sleep current
- * Life time of 2000 mA battery is 479 days
- * 
- 
+ * Total connect time per loop 1500 mS if all sensor values change
+ * but only 14 mS when no signficant change in sensor value.
+ * Calculated average current of 0.174 mA with 20 uA sleep current and 1.5 S loop
+ * Life time of 2000 mA battery is 479 days.
+ * Greater the 10 years with no sensor value changes.
+ *
 */
 
 //#define DEBUG  // Controls print statements. Comment out for production
@@ -42,6 +43,8 @@
 #define BARO_CHILD 1
 #define TEMP_CHILD 2
 #define HUM_CHILD 3
+#define VOLT_CHILD 4
+
 // All defines must be before any library inclusions
 
 #include <SPI.h>
@@ -53,10 +56,17 @@
 // Define variables to use later
 bool initialValueSent = false;
 unsigned long sleepTime = 300000; // Update every 5 minutes
+float lastTemperature = 0;
+float lastPressure = 0;
+float lastHumidity = 0;
+float lastBattery = 0;
 
-MyMessage tempMsg(TEMP_CHILD, V_TEMP);
-MyMessage humMsg(HUM_CHILD, V_HUM);
-MyMessage pressureMsg(BARO_CHILD, V_PRESSURE);
+// Only use one variable type per child
+// Customize HA to display icon and units
+MyMessage tempMsg(TEMP_CHILD, V_VAR1);
+MyMessage humMsg(HUM_CHILD, V_VAR1);
+MyMessage pressureMsg(BARO_CHILD, V_VAR1);
+MyMessage voltageMsg(VOLT_CHILD, V_VAR1);
 
 BME280 mySensor; //Global sensor object
 
@@ -68,7 +78,7 @@ void setup()
   input as an output.
   The radio does not work without the floowing pinMode statement.
   */
-  pinMode(A2, OUTPUT);  
+  pinMode(A2, OUTPUT);  //Used for RFM69 CS (NSS)
   #ifdef DEBUG
   SerialUSB.begin(9600);
   SerialUSB.println("Example showing alternate I2C addresses");
@@ -86,14 +96,16 @@ void setup()
   mySensor.setMode(MODE_SLEEP); //Sleep for now
 }
 
-void presentation()  {
+void presentation()
+{
   #ifdef DEBUG
   SerialUSB.println("Sending Presentation Info");
   #endif
   sendSketchInfo("MySensors_BME280", "1.0");   //Max 25 characters.  Optional to do.
-  present(TEMP_CHILD, S_TEMP);
-  present(HUM_CHILD, S_HUM);
-  present(BARO_CHILD, S_BARO);
+  present(TEMP_CHILD, S_CUSTOM);
+  present(HUM_CHILD, S_CUSTOM);
+  present(BARO_CHILD, S_CUSTOM);
+  present(VOLT_CHILD, S_CUSTOM);
 }
 void loop()
 {
@@ -114,6 +126,9 @@ void loop()
   float temperature = mySensor.readTempC();
   float humidity = mySensor.readFloatHumidity();
   float pressure = mySensor.readFloatPressure() / 100.0;
+  float battery = analogRead(BATTERY_PIN);
+  //Reads 147 per volt
+  battery = battery / 147;
   #ifdef DEBUG
   SerialUSB.print(" Temp: ");
   SerialUSB.print(temperature);
@@ -121,24 +136,34 @@ void loop()
   SerialUSB.print(humidity);
   SerialUSB.print(" Pressure: ");
   SerialUSB.print(pressure);
-  #endif 
-  send(tempMsg.set(temperature, 1));
-  send(humMsg.set(humidity, 0));
-  send(pressureMsg.set(pressure, 1));
-  float battery = analogRead(BATTERY_PIN);
-  //Reads 147 per volt
-  // 5.00 max  =  0.136  (100/(5*147)
-  battery = battery * 0.136;
-  if (battery > 100.0)
-  {
-    battery = 100.0;
-  }
-  //uint8_t batteryVoltage = 93;
-  #ifdef DEBUG
-  SerialUSB.print(" Battery Percent: ");
-  SerialUSB.println(byte(battery));
+  SerialUSB.print(" Battery Voltage ");
+  SerialUSB.println(battery);
   #endif
-  sendBatteryLevel(byte(battery));  
+  // To Save power only send message on changed values
+  if (abs(temperature - lastTemperature) > 0.1)
+  {
+    send(tempMsg.set(temperature, 1));
+    lastTemperature = temperature;
+  }
+  if (abs(humidity - lastHumidity) > 1.0)  
+  {
+    send(humMsg.set(humidity, 0));
+    lastHumidity = humidity;
+  }
+  
+  if (abs(pressure - lastPressure) > 1.0)
+  {
+    send(pressureMsg.set(pressure, 1));
+    lastPressure = pressure;
+  }
+  
+  if (abs(battery - lastBattery) > 0.1)
+  {
+    send(voltageMsg.set(battery, 2));
+    lastBattery = battery;
+  }
+    
+  // sendBatteryLevel(byte(battery)); Not using since percentage is not as meaningful
   #ifdef DEBUG
   endTime = millis();
   SerialUSB.print(" Total time(ms): ");
@@ -152,7 +177,7 @@ void loop()
   writeRegister(0x01, 0x00);
   // Arduino Sleep
   #ifdef DEBUG
-    wait(sleepTime); //Use this to debug radio sleep only.
+    wait(5000); //Use this to debug radio sleep only.
   #else 
     LowPower.deepSleep(sleepTime);
     wait(10);
@@ -162,14 +187,16 @@ void loop()
   //SerialUSB.println(sleep(sleepTime)); //Not working from MySensors.h
 }
 
-void dummy() {
+void dummy()
+{
   // This function will be called once on device wakeup
   // You can do some little operations here (like changing variables which will be used in the loop)
   // Remember to avoid calling delay() and long running functions since this functions executes in interrupt context
 }
 
 //Read from RFM69HW register
-byte readRegister(byte dataToSend) {
+byte readRegister(byte dataToSend)
+{
   byte result;   // result to return
   // take the chip select low to select the device:
   digitalWrite(MY_RFM69_CS_PIN, LOW);
@@ -185,7 +212,8 @@ byte readRegister(byte dataToSend) {
 
 
 //Sends a write command to RFM69HW
-void writeRegister(byte thisRegister, byte thisValue) {
+void writeRegister(byte thisRegister, byte thisValue)
+{
   // now combine the register address and the write command into one byte:
   byte dataToSend = thisRegister | 0x80;
   // take the chip select low to select the device:
