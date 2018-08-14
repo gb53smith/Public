@@ -3,6 +3,7 @@
    Version 1.0 - Graham Smith
    Version 1.1 - Changed V_VAR1 to V_CUSTOM
    Version 1.2 - Correct battery voltage reading to use 12 bit ADC
+   Version 1.3 - Fix recovery after gateway power cycling
 
    DESCRIPTION
    Uses the BME280 as a temperature, humidity and pressure sensor.
@@ -71,6 +72,7 @@
 
 // Define variables to use later
 bool initialValueSent = false;
+volatile bool awakeFlag = false; 
 unsigned long sleepTime = 300000; // Update every 5 minutes
 float lastTemperature = 0;
 float lastPressure = 0;
@@ -97,6 +99,7 @@ void setup()
   pinMode(A2, OUTPUT);  //Used for RFM69 CS (NSS)
   //Setup ADC. Arduino default is 10 bits
   analogReadResolution(12);
+  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, awake, CHANGE);
 #ifdef DEBUG
   SerialUSB.begin(9600);
   SerialUSB.println("In setup function.");
@@ -204,10 +207,18 @@ void loop()
   // Restoring Radio
   writeRegister(0x01, rfmOpMode);
   //SerialUSB.println(sleep(sleepTime)); //Not working from MySensors.h
+  if (awakeFlag) // Flash LED twice when waking up from sleep.
+  {
+    if (transportCheckUplink())
+    {
+    }
+    awakeFlag = false;
+  }
 }
 
-void dummy()
+void awake()
 {
+  awakeFlag = true;
   // This function will be called once on device wakeup
   // You can do some little operations here (like changing variables which will be used in the loop)
   // Remember to avoid calling delay() and long running functions since this functions executes in interrupt context

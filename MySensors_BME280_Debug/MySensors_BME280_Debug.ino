@@ -211,7 +211,11 @@ void loop()
 #ifdef DEBUG  
   if (awakeFlag) // Flash LED twice when waking up from sleep.
   {
-    blink();
+    if (transportCheckUplink())
+    {
+      blink();
+    }
+
     awakeFlag = false;
 
   }
