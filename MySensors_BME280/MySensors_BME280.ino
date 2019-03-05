@@ -4,6 +4,8 @@
    Version 1.1 - Changed V_VAR1 to V_CUSTOM
    Version 1.2 - Correct battery voltage reading to use 12 bit ADC
    Version 1.3 - Fix recovery after gateway power cycling
+   Version 1.4 - Prevent send if gateway is down.
+   Version 1.5 - Improve recovery from Gateway power cycling
 
    DESCRIPTION
    Uses the BME280 as a temperature, humidity and pressure sensor.
@@ -40,7 +42,9 @@
 */
 
 //#define DEBUG  // Controls print statements. Comment out for production
-//#define MY_DEBUG_VERBOSE_RFM69
+//#define DEBUG_BAT  // Controls LED blinks for battery operation debug. Comment out for production
+//#define MY_DEBUG  //Controls logging of protocol messages. Comment out for production
+//#define MY_DEBUG_VERBOSE_RFM69 //Controls logging  of radio messages. Comment out for production
 
 // Configure RFM69 Radio
 #define MY_RADIO_RFM69
@@ -54,8 +58,12 @@
 #define MY_RF69_IRQ_NUM 9
 #define MY_RFM69_CS_PIN A2
 #define BATTERY_PIN A5
+#define LED_PIN LED_BUILTIN
 
 // Configure MySensors Node and its children
+// Parent is always my gateway.  No need to search
+#define MY_PARENT_NODE_ID 0
+#define MY_PARENT_NODE_IS_STATIC
 #define MY_NODE_ID 2 // Manually assigned node ID for this device.  AUTO not supported if using MQTT
 #define BARO_CHILD 1
 #define TEMP_CHILD 2
@@ -73,7 +81,11 @@
 // Define variables to use later
 bool initialValueSent = false;
 volatile bool awakeFlag = false; 
-unsigned long sleepTime = 300000; // Update every 5 minutes
+#ifdef DEBUG_BAT
+  unsigned long sleepTime = 5000; // Update every 5 seconds
+#else
+  unsigned long sleepTime = 300000; // Update every 5 minutes
+#endif
 float lastTemperature = 0;
 float lastPressure = 0;
 float lastHumidity = 0;
@@ -100,6 +112,11 @@ void setup()
   //Setup ADC. Arduino default is 10 bits
   analogReadResolution(12);
   LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, awake, CHANGE);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+  
+  //SerialUSB does not work when sleeping the Moteino M0 board.
+  // Blinking LED was used in debug mode.
 #ifdef DEBUG
   SerialUSB.begin(9600);
   SerialUSB.println("In setup function.");
@@ -108,7 +125,7 @@ void setup()
   Wire.setClock(400000); //Increase to fast I2C speed!
 
   mySensor.beginI2C();
-  // Use same settings as Micropython version
+  // Use same settings as Micro Python version
   mySensor.settings.filter = 3;
   mySensor.settings.tempOverSample = 8;
   mySensor.settings.pressOverSample = 4;
@@ -132,15 +149,15 @@ void presentation()
 void loop()
 {
   mySensor.setMode(MODE_FORCED); //Wake up sensor and take reading
-  //#ifdef DEBUG
+  #ifdef DEBUG
   long startTime = millis();
-  //#endif
+  #endif
   while (mySensor.isMeasuring() == false) ; //Wait for sensor to start measurment
   while (mySensor.isMeasuring() == true) ; //Hang out while sensor completes the reading
 #ifdef DEBUG
   long endTime = millis();
 
-  //Sensor is now back asleep but we get get the data
+  //Sensor is back from sleep so we can now get the data
 
   SerialUSB.print(" Measure time(ms): ");
   SerialUSB.println(endTime - startTime);
@@ -161,31 +178,48 @@ void loop()
   SerialUSB.print(" Battery Voltage ");
   SerialUSB.println(battery);
 #endif
-  // To Save power only send message on changed values
-  if (abs(temperature - lastTemperature) > 0.1)
+  // Only attempt to send if link is up else sleep again.
+  if (transportCheckUplink(true))
   {
+    #ifdef DEBUG
+      SerialUSB.println("Uplink OK ");
+      send(tempMsg.set(temperature, 1));
+    #endif
+    #ifdef DEBUG_BAT
+      send(tempMsg.set(temperature, 1));
+    #endif   
+    // To Save power only send message on changed values
+    if (abs(temperature - lastTemperature) > 0.1)
+    {
     send(tempMsg.set(temperature, 1));
     lastTemperature = temperature;
-  }
-  if (abs(humidity - lastHumidity) > 1.0)
-  {
+    }
+    if (abs(humidity - lastHumidity) > 1.0)
+    {
     send(humMsg.set(humidity, 0));
     lastHumidity = humidity;
-  }
+    }
 
-  if (abs(pressure - lastPressure) > 1.0)
-  {
+    if (abs(pressure - lastPressure) > 1.0)
+    {
     send(pressureMsg.set(pressure, 1));
     lastPressure = pressure;
-  }
+    }
 
-  if (abs(battery - lastBattery) > 0.1)
-  {
+    if (abs(battery - lastBattery) > 0.1)
+    {
     send(voltageMsg.set(battery, 2));
     lastBattery = battery;
+    }
+  } else {
+    #ifdef DEBUG_BAT
+       blink();
+    #endif   
+   #ifdef DEBUG
+      SerialUSB.println("Uplink Down ");
+    #endif
   }
 
-  // sendBatteryLevel(byte(battery)); Not using since percentage is not as meaningful
 #ifdef DEBUG
   endTime = millis();
   SerialUSB.print(" Total time(ms): ");
@@ -193,26 +227,28 @@ void loop()
 #endif
 
   //Read current mode of radio
-  byte rfmOpMode = readRegister(0x01);
+  // byte rfmOpMode = readRegister(0x01);
 
   // Sleeping Radio
   writeRegister(0x01, 0x00);
   // Arduino Sleep
 #ifdef DEBUG
-  wait(5000); //Use this to debug radio sleep only.
+  wait(5000); //Use this to debug radio sleep only. Time is in mS
 #else
+  wait(10); //Some settle time before sleeping
   LowPower.deepSleep(sleepTime);
   wait(10);
 #endif
-  // Restoring Radio
-  writeRegister(0x01, rfmOpMode);
-  //SerialUSB.println(sleep(sleepTime)); //Not working from MySensors.h
+  // Restoring Radio to Listen Mode
+  writeRegister(0x01, 0x10);
+  
   if (awakeFlag) // Flash LED twice when waking up from sleep.
   {
-    if (transportCheckUplink())
-    {
-    }
+    #ifdef DEBUG_BAT
+      blink2();
+    #endif
     awakeFlag = false;
+    
   }
 }
 
@@ -224,7 +260,8 @@ void awake()
   // Remember to avoid calling delay() and long running functions since this functions executes in interrupt context
 }
 
-//Read from RFM69HW register
+//Read from RFM69HW register.  Not used
+/*
 byte readRegister(byte dataToSend)
 {
   byte result;   // result to return
@@ -239,7 +276,7 @@ byte readRegister(byte dataToSend)
   // return the result:
   return (result);
 }
-
+*/
 
 //Sends a write command to RFM69HW
 void writeRegister(byte thisRegister, byte thisValue)
@@ -252,4 +289,21 @@ void writeRegister(byte thisRegister, byte thisValue)
   SPI.transfer(thisValue);  //Send value to record into register
   // take the chip select high to de-select:
   digitalWrite(MY_RFM69_CS_PIN, HIGH);
+}
+
+void blink2()
+{
+  digitalWrite(LED_PIN, HIGH);
+  wait(100);
+  digitalWrite(LED_PIN, LOW);
+  wait(1000);
+  digitalWrite(LED_PIN, HIGH);
+  wait(100);
+  digitalWrite(LED_PIN, LOW);
+}
+void blink()
+{
+  digitalWrite(LED_PIN, HIGH);
+  wait(100);
+  digitalWrite(LED_PIN, LOW);
 }
