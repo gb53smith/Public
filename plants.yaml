@@ -1,0 +1,108 @@
+# logger:
+  # level: NONE
+
+# substitutions:
+  # node_name: plants
+  # device_verbose_name: "Basement Plants"
+  
+# packages:
+  # nodemcu: !include common/nodemcu.yaml
+  
+# switch:
+  # - platform: gpio
+    # pin: 14
+    # name: "Plant Light"
+  # - platform: gpio
+    # pin: 12
+    # name: "Plant Heater"
+  # - platform: gpio
+    # pin: 13
+    # name: "Plant Dehumidifier"
+
+
+# sensor:
+  # - platform: dht
+    # pin: 2
+    # temperature:
+      # name: "Plants Temperature"
+      # filters:
+      # - delta: 0.2
+      # # # Max delta filter
+      # # - lambda: |-
+            # # float MAX_DIFFERENCE = 5.0;  // adjust this!
+            # # static float last_value = NAN;
+            # # if (isnan(last_value) || std::abs(x - last_value) < MAX_DIFFERENCE)
+              # # return last_value = x;
+            # # else
+              # # return {};
+      # #- lambda: !lambda if ( x < 13.0 ) { return x * 2.0; } else { return x; }
+    # humidity:
+      # name: "Plants Humidity"
+      # filters:
+      # - delta: 1
+    # update_interval: 10s
+    # model: DHT22_TYPE2
+
+
+esphome:
+  name: plants
+  platform: ESP8266
+  board: nodemcuv2
+  includes:
+    - my_dht.h
+  #libraries:
+  #  - "diaoul/DHTNew @ 1.0.0"
+
+wifi:
+  ssid: "GreenMountain"
+  password: !secret wifi_password
+ 
+# Enable logging
+logger:
+  level: DEBUG
+  esp8266_store_log_strings_in_flash: False
+
+# Enable Home Assistant API
+api:
+  password: !secret ota_password
+
+ota:
+  password: !secret ota_password
+  
+switch:
+  - platform: gpio
+    pin: 14
+    name: "Plant Light"
+  - platform: gpio
+    pin: 12
+    name: "Plant Heater"
+  - platform: gpio
+    pin: 13
+    name: "Plant Dehumidifier"
+
+dallas:
+  - pin: GPIO10
+    update_interval: 10s
+    
+sensor:
+  - platform: custom
+    lambda: |-
+      auto my_dht = new MyDHT();
+      App.register_component(my_dht);
+      return {my_dht->temperature_sensor, my_dht->humidity_sensor};
+    sensors:
+    - name: "Plants Temperature"
+      unit_of_measurement: °C
+      accuracy_decimals: 1
+      filters:
+      - delta: 0.2
+    - name: "Plants Humidity"
+      unit_of_measurement: "%"
+      filters:
+      - delta: 1
+  - platform: dallas
+    address: 0x1F3C01B556A19A28
+    name: "Plants Soil Temperature"
+    filters:
+      - delta: 0.2
+
