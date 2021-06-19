@@ -57,6 +57,8 @@ class MyDHT : public PollingComponent, public Sensor {
   float get_setup_priority() const override { return esphome::setup_priority::DATA; }
 
 // Returns true if a reading attempt was made (successful or not)
+// Copied from diaoul/DHTNew @ 1.0.0 on PlatformIO.  
+// All Esphome components should identify and credit the source with a version number too!
 bool read(bool force) {
     // don't read more than every getMinimumSamplingPeriod() milliseconds
     int getMinimumSamplingPeriod = 2000;
@@ -77,8 +79,8 @@ bool read(bool force) {
     if (_model == DHT_MODEL_DHT11)
         delay(18); // [18-20]ms
     else
-        delayMicroseconds(800); // [0.8-20]ms
-
+        // Increased from 800 us to use the datasheet recommended value.  Probably not necessary but an extra 200 us won't hurt.  
+        delayMicroseconds(1000); // [0.8-20]ms 
     // init data
     uint8_t data[5] = {0};
 
