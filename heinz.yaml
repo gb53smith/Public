@@ -1,0 +1,90 @@
+substitutions:
+  l_name: heinz
+  u_name: Heinz
+
+esphome:
+  name: $l_name
+  platform: ESP8266
+  board: esp01_1m
+
+wifi: 
+  networks:
+  - ssid: "GreenMountain" #GBS
+    password: !secret wifi_password #GBS
+  - ssid: "GreenMountain" #GBS
+    password: !secret wifi_password #GBS
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  services:
+    - service: flash
+      then:
+        - output.turn_on: output1
+        - delay: 150ms
+        - output.turn_off: output1
+        - delay: 150ms
+        - output.turn_on: output1
+        - delay: 150ms
+        - output.turn_off: output1
+        - delay: 150ms
+        - output.turn_on: output1
+        - delay: 150ms
+        - output.turn_off: output1
+        - delay: 150ms
+        - if:
+            condition:
+              light.is_on: light1
+            then:
+              - output.turn_on: output1
+    - service: restart
+      then:
+        - switch.toggle: restart_my_esp
+
+ota:
+
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO13 #GBS Board won't boot if GPIO0 is GND at restart
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "Heinz button"
+    on_press:
+      - light.toggle: light1
+
+light:
+  - platform: binary
+    name: "$u_name"
+    id: light1
+    output: output1
+
+output:
+  - platform: gpio
+    pin: GPIO12
+    id: output1
+
+status_led:
+  pin:
+    number: GPIO13
+    inverted: yes
+
+sensor:
+  - platform: wifi_signal
+    name: "$u_name WiFi signal"
+    update_interval: 60s
+
+  - platform: uptime
+    name: "$u_name uptime"
+    
+switch:
+  - platform: restart
+    id: restart_my_esp
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "$u_name IP"
